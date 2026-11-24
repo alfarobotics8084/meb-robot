@@ -74,6 +74,13 @@ input[type=number]{width:90px}
 .pill{display:inline-block;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:700;background:var(--bad);color:#fff}
 .pill.ok{background:var(--ok);color:#05200e}
 .hint{color:var(--dim);font-size:12px;margin-top:6px}
+#pidHelp h3{margin:20px 0 8px;font-size:15px}
+#pidHelp ol{margin:0;padding-left:20px;line-height:1.7}
+#pidHelp table.ph{margin-top:4px}
+#pidHelp table.ph th{text-align:left;padding:6px 10px 6px 0;font-size:12px;color:var(--dim);border-bottom:1px solid var(--line);white-space:nowrap}
+#pidHelp table.ph td{padding:8px 10px 8px 0;vertical-align:top;font:13px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;color:var(--text);width:auto}
+#pidHelp table.ph td:first-child{color:var(--text);white-space:nowrap}
+@media (max-width:700px){#pidHelp table.ph{display:block;overflow-x:auto}}
 #pidGrid .row,#pidGrid h2{position:relative}
 #pidGrid [data-tip] label,#pidGrid h2[data-tip]{text-decoration:underline dotted var(--dim);text-underline-offset:3px;cursor:help}
 #pidGrid [data-tip]:hover::after,#pidGrid .row[data-tip]:focus-within::after{content:attr(data-tip);position:absolute;left:0;bottom:calc(100% + 8px);z-index:20;width:min(330px,88vw);padding:10px 12px;border-radius:10px;background:#0a0e13;border:1px solid var(--acc);box-shadow:0 6px 20px rgba(0,0,0,.5);color:var(--text);font:400 12px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;letter-spacing:0;text-transform:none;white-space:normal;text-align:left;pointer-events:none}
@@ -161,6 +168,53 @@ td:last-child{font-family:ui-monospace,Consolas,monospace}
   <div class="card" style="margin-top:16px">
     <div class="row" style="margin-top:0"><button id="pidSave">Kalıcı kaydet</button><button id="pidDef">Varsayılana dön</button><button id="pidReload">Robottan yeniden oku</button></div>
     <div class="hint" id="pidMsg">Değer değişince robota hemen uygulanır. Kalıcı olması için "Kalıcı kaydet"e basın (yoksa reset'te kaybolur).</div>
+  </div>
+  <div class="card" id="pidHelp" style="margin-top:16px">
+    <h2>Hangi ayar ne işe yarar?</h2>
+    <h3>Ayarlama sırası</h3>
+    <ol>
+      <li>Ki ve Kd'yi <b>0</b>'da bırak, sadece <b>Kp</b> ile başla.</li>
+      <li>Robot hedefe ya da çizgiye yavaş ve gevşek gidiyorsa Kp'yi biraz artır. Sallanmaya başlarsa bir adım geri al.</li>
+      <li>Hedefin birkaç cm önünde ya da çizginin kenarında kalıyorsa <b>Ki</b>'ye küçük bir değer ver. Etkisi yoksa ikiye katla.</li>
+      <li>Hedefi geçip geri dönüyorsa <b>Kd</b>'ye küçük bir değer ver. Etkisi yoksa ikiye katla.</li>
+      <li>Bir seferde <b>tek ayarı</b> değiştir, her değişiklikten sonra aynı rotayı yeniden dene. Beğenince "Kalıcı kaydet"e bas.</li>
+    </ol>
+    <h3>Kp, Ki, Kd ne yapar (ilk dört kart)</h3>
+    <table class="ph">
+      <tr><th>Ayar</th><th>Ne işe yarar</th><th>Artırırsan</th><th>Azaltırsan</th><th>Varsayılan</th></tr>
+      <tr><td><b>Kp</b></td><td>Hata büyüdükçe daha çok güç verir.</td><td>Daha hızlı ve sert gider. Çok artırırsan hedefin iki yanına gidip gelir (salınım).</td><td>Yumuşak ama gevşek olur. Hedefe yetişemeyebilir.</td><td>Otonom konum 0,6 · Otonom açı 0,5 · Yol konum 0,8 · Yol açı 0,7 (aralık 0-10)</td></tr>
+      <tr><td><b>Ki</b></td><td>Küçük, kalıcı hatayı zamanla kapatır.</td><td>Hedefin önünde durma sorunu çabuk düzelir. Çok artırırsan hedefi aşar ve sallanır.</td><td>0'da kapalıdır. Robot hedefin birkaç cm önünde takılı kalabilir.</td><td>0 (aralık 0-5)</td></tr>
+      <tr><td><b>Kd</b></td><td>Hata hızla değişirken fren yapar.</td><td>Hedefe daha yumuşak yaklaşır, daha az geçer. Çok artırırsan titrer.</td><td>0'da kapalıdır. Robot hedefi daha çok geçebilir.</td><td>0 (aralık 0-5)</td></tr>
+    </table>
+    <h3>Dört kart neyi etkiler</h3>
+    <table class="ph">
+      <tr><th>Kart</th><th>Hangi durumda çalışır</th></tr>
+      <tr><td><b>Otonom: konum</b></td><td>Adım adım otonom (Forward, GoTo gibi): hedefe kalan mesafeye göre güç.</td></tr>
+      <tr><td><b>Otonom: açı</b></td><td>Adım adım otonom: dönüşler ve açıyı tutma.</td></tr>
+      <tr><td><b>Yol takibi: konum sapması</b></td><td>Yol Planlayıcı rotası: robot çizilen yoldan sapınca geri çeker.</td></tr>
+      <tr><td><b>Yol takibi: açı</b></td><td>Yol Planlayıcı rotası: robotun bakış açısını yol boyunca planlanan açıda tutar.</td></tr>
+    </table>
+    <h3>Motor hız PID (son kart)</h3>
+    <table class="ph">
+      <tr><th>Ayar</th><th>Ne işe yarar</th><th>Değiştirirsen</th><th>Varsayılan</th></tr>
+      <tr><td><b>Açık / Kapalı</b></td><td>Her tekerin hızını enkoderden okuyup hedef hıza eşitler.</td><td>1 yaparsan pil boşalsa da robot aynı hızda gider, tekerlerin hızı birbirine yaklaşır. 0'da güç doğrudan motora gider (eski davranış). Önce robot takozdayken dene.</td><td>0 (kapalı)</td></tr>
+      <tr><td><b>Kp (% / rpm)</b></td><td>Hız farkı başına eklenen güç.</td><td>Artırırsan teker hedef hıza daha çabuk ulaşır. Çok artırırsan teker sallanır ve ses çıkarır.</td><td>0,05 (aralık 0-5)</td></tr>
+      <tr><td><b>Ki</b></td><td>Hız farkını yavaş yavaş kapatır.</td><td>Artırırsan pil düşse bile hız sabit kalır. Çok artırırsan hız ileri geri dalgalanır. 0 olursa pil düştükçe robot yavaşlar.</td><td>0,1 (aralık 0-5)</td></tr>
+      <tr><td><b>Kd</b></td><td>Hız ani değişirken sertliği azaltır.</td><td>Genelde 0 bırak. Artırırsan teker titreyebilir.</td><td>0 (aralık 0-5)</td></tr>
+      <tr><td><b>İleri besleme</b></td><td>İstenen gücün ne kadarı doğrudan motora verilir (1 = hepsi). PID kalan farkı düzeltir.</td><td>Azaltırsan PID daha çok iş yapar ve tepki yavaşlar. Normalde 1 bırak.</td><td>1 (aralık 0-2)</td></tr>
+      <tr><td><b>%100 = rpm</b></td><td>Motorun tam güçte gerçek rpm değeri. Güç yüzdesi bu değerle rpm'e çevrilir.</td><td>Yanlış girersen teker hedeflenenden hızlı ya da yavaş döner. Robotu tam güçte çalıştırıp Panel'deki rpm'i okuyarak yaz.</td><td>700 (aralık 100-2000)</td></tr>
+    </table>
+    <h3>Belirtiye göre ne yapmalı</h3>
+    <table class="ph">
+      <tr><th>Gördüğün</th><th>Dene</th></tr>
+      <tr><td>Robot hedefin iki yanına gidip geliyor (sallanıyor)</td><td>Kp'yi düşür. Ki varsa onu da azalt.</td></tr>
+      <tr><td>Robot hedefin birkaç cm önünde duruyor</td><td>Ki'yi biraz artır ya da Kp'yi biraz artır.</td></tr>
+      <tr><td>Robot hedefi geçip geri dönüyor</td><td>Kd'yi biraz artır, olmazsa Kp'yi düşür.</td></tr>
+      <tr><td>Robot çizdiğin yoldan sapıyor</td><td>Yol takibi: konum sapması Kp'sini artır.</td></tr>
+      <tr><td>Dönerken ya da açıyı tutarken sallanıyor</td><td>Açı kartındaki Kp'yi düşür.</td></tr>
+      <tr><td>Tekerler hız PID'i açıkken sallanıyor ya da ses çıkarıyor</td><td>Hız PID'inde Kp'yi düşür, Kd'yi 0 yap. Düzelmezse PID'i kapat (0).</td></tr>
+      <tr><td>Pil boşalınca robot yavaşlıyor</td><td>Hız PID'ini aç ve Ki'nin 0'dan büyük olduğundan emin ol.</td></tr>
+    </table>
   </div>
 </section>
 
