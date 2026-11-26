@@ -63,7 +63,10 @@ const robotS=()=>typeof S!=='undefined'?S:null;
 function fresh(){P=JSON.parse(JSON.stringify(DEF));const T=P.tile;P.wp=[mkW(1.5*T,0.5*T,90,90,40),mkW(1.5*T,2.5*T,90,90,40)];sel=0;playT=0}
 function fix(o){const p=Object.assign(JSON.parse(JSON.stringify(DEF)),o||{});
  p.wp=(Array.isArray(p.wp)?p.wp:[]).filter(w=>w&&isFinite(w.x)&&isFinite(w.y)).map(w=>Object.assign(mkW(0,0,0,0,30),w));
- if(!p.wp.length)p.wp=[mkW(90,30,90,90,40)];return p}
+ if(!p.wp.length)p.wp=[mkW(90,30,90,90,40)];
+ // Olay (şişe bırakma vb.) ya da şişe bekleme olan nokta ARA nokta olamaz: robot oraya tam varıp durmalı
+ p.wp.forEach((w,i)=>{if(i<p.wp.length-1&&(w.e>0||w.c)&&!w.st){w.st=true;if(!(w.w>=300))w.w=600}});
+ return p}
 function draft(){clearTimeout(saveTm);saveTm=setTimeout(()=>{try{localStorage.setItem('pp_draft',JSON.stringify({P,slot}))}catch(e){}},300)}
 try{const d=JSON.parse(localStorage.getItem('pp_draft')||'null');if(d&&d.P){P=fix(d.P);slot=d.slot||1;if(P.v100===140)P.v100=300}}catch(e){}
 if(!P)fresh();
@@ -265,7 +268,10 @@ document.addEventListener('keydown',e=>{if(!$('p-plan')||!$('p-plan').classList.
  if(e.key==='Delete'||e.key==='Backspace'){delW(sel);e.preventDefault()}});
 
 for(const[id,k]of WF)$(id).addEventListener('input',e=>{const v=parseFloat(e.target.value);if(!isFinite(v))return;const w=P.wp[sel];
- w[k]=k==='h'?wrap(v):k==='e'?cl(Math.round(v),0,255):(k==='w'||k==='s')?Math.max(0,v):v;changed(true)});
+ w[k]=k==='h'?wrap(v):k==='e'?cl(Math.round(v),0,255):(k==='w'||k==='s')?Math.max(0,v):v;
+ const forced=k==='e'&&w.e>0&&sel<P.wp.length-1&&!w.st;   // olay verilen nokta otomatik "burada dur" olur
+ if(forced){w.st=true;if(!(w.w>=300))w.w=600}
+ changed(!forced)});
 $('wSt').onchange=e=>{const w=P.wp[sel];w.st=e.target.checked;if(!w.st)w.c=0;changed()};
 $('wC').onchange=e=>{const w=P.wp[sel];w.c=e.target.checked?1:0;if(w.c){w.st=true;if(!(w.w>=1000))w.w=8000}changed()};
 for(const[id,k,mn]of CF)$(id).addEventListener('input',e=>{const v=parseFloat(e.target.value);if(isFinite(v)&&v>=mn){P[k]=v;changed(true)}});
@@ -293,7 +299,7 @@ $('ppFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{P=fix(
 // pw(x, y, açı, eğri yönü, giriş tutamacı, çıkış tutamacı, ek ayarlar)
 const pw=(x,y,h,d,li,lo,o)=>Object.assign(mkW(x,y,h,d,0),{li,lo},o||{});
 const STOP=(w,e)=>({st:true,w,e:e||0});
-const RB=[[91.5,30.5],[274.5,30.5]],RP=[[30.5,91.5],[335.5,91.5]],GDT=[183,26],RACK=[[91.5,99],[274.5,99]];
+const RB=[[91.5,30.5],[274.5,30.5]],RP=[[30.5,91.5],[335.5,91.5]],GDT=[183,23],RACK=[[91.5,99],[274.5,99]];
 const RED=[];
 [0,1].forEach(s=>{const side=s?'sağ':'sol',B=RB[s],Pk=RP[s],K=RACK[s],toG=s?180:0,toP=s?30:150;
  // En hızlı: B'den çapraz komşu P'ye dümdüz (yaklaşık 2 sn)

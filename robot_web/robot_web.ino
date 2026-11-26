@@ -219,6 +219,76 @@ void bottleUpdate() {
   else { last = raw; same = 1; }
   if (same >= BOTTLE_SW_DEBOUNCE) bottleIn = raw;
 }
+
+// ================= SERVO (PCA9685 -> goBILDA 6V Injector) =================
+// Bağlantı: ESP32 SDA 21 / SCL 22 (BNO055 ile ortak I2C), PCA9685 adresi 0x40.
+//   PCA9685 kanal 0..5  ->  Injector "Signal Input 1..6" (yalnızca S ve - pinleri)
+//   PCA9685'in V+ klemensine BİR ŞEY BAĞLAMAYIN: servo gücü Injector'dan gelir.
+//   ESP32, PCA9685 ve Injector toprakları ORTAK olmalı. Injector girişi (8-15 V) Ana Şalter'den sonra.
+// Kullanım (loop içinden; örn. pathEvent veya teleopLoop):
+//   servoAc(0, 90);          // 1. servoyu 90 dereceye götür
+//   servoBirak(0);           // 1. servonun darbesini kes (servo serbest kalır)
+//   servoHepsiniBirak();     // hepsini bırak
+// Panel > "Servo Testi" kartı ve Seri Monitör "v <kanal> <derece>" ile elle denenir.
+const uint8_t PCA_ADDR = 0x40;
+const int SERVO_N = 6;   // kullanılan kanal sayısı (en fazla 16; kılavuz: robotta en fazla 12 servo)
+// Servo modeline göre ayarlayın: darbe genişliği (µs) ve bu aralığın karşılık geldiği açı (derece).
+// goBILDA servolarda genelde 500-2500 µs; açı aralığı modele göre 180 ya da 300 olabilir (ürün sayfasına bakın).
+const float SERVO_MIN_US[SERVO_N]    = {500, 500, 500, 500, 500, 500};
+const float SERVO_MAX_US[SERVO_N]    = {2500, 2500, 2500, 2500, 2500, 2500};
+const float SERVO_RANGE_DEG[SERVO_N] = {180, 180, 180, 180, 180, 180};
+// Açılışta ve "Hazırla"da servonun gideceği başlangıç açısı (-1 = darbe gönderme). Başlangıç konfigürasyonu için.
+const float SERVO_START_DEG[SERVO_N] = {-1, -1, -1, -1, -1, -1};
+bool pcaOk = false;
+
+bool pcaWrite(uint8_t reg, const uint8_t *d, uint8_t n) {
+  Wire.beginTransmission(PCA_ADDR);
+  Wire.write(reg);
+  for (uint8_t i = 0; i < n; i++) Wire.write(d[i]);
+  return Wire.endTransmission() == 0;
+}
+bool pcaWrite1(uint8_t reg, uint8_t v) { return pcaWrite(reg, &v, 1); }
+
+// Kanal darbesi: us > 0 ise o genişlikte darbe, us <= 0 ise çıkış tamamen kapalı
+void pcaPulse(int ch, float us) {
+  if (!pcaOk || ch < 0 || ch > 15) return;
+  uint8_t b[4];
+  if (us <= 0) {
+    b[0] = 0; b[1] = 0; b[2] = 0; b[3] = 0x10;                 // LEDn_OFF_H bit 4 = tam kapalı
+  } else {
+    int off = (int)(us * 4096.0f * 50.0f / 1000000.0f + 0.5f);  // 50 Hz, 12 bit
+    off = constrain(off, 1, 4095);
+    b[0] = 0; b[1] = 0; b[2] = off & 0xFF; b[3] = off >> 8;
+  }
+  pcaWrite(0x06 + 4 * ch, b, 4);
+}
+
+void servoAc(int ch, float deg) {
+  if (ch < 0 || ch >= SERVO_N) return;
+  deg = constrain(deg, 0.0f, SERVO_RANGE_DEG[ch]);
+  pcaPulse(ch, SERVO_MIN_US[ch] + (SERVO_MAX_US[ch] - SERVO_MIN_US[ch]) * deg / SERVO_RANGE_DEG[ch]);
+}
+void servoBirak(int ch) { if (ch >= 0 && ch < SERVO_N) pcaPulse(ch, 0); }
+void servoHepsiniBirak() { for (int i = 0; i < SERVO_N; i++) servoBirak(i); }
+// Panel / seri test komutu: derece >= 0 -> aç, < 0 -> bırak
+void servoCmd(int ch, int deg) { if (deg < 0) servoBirak(ch); else servoAc(ch, deg); }
+void servoBaslangic() { for (int i = 0; i < SERVO_N; i++) if (SERVO_START_DEG[i] >= 0) servoAc(i, SERVO_START_DEG[i]); }
+
+void servoBegin() {
+  Wire.beginTransmission(PCA_ADDR);
+  pcaOk = Wire.endTransmission() == 0;
+  if (!pcaOk) { tlog("PCA9685 bulunamadı (0x%02X) - servolar çalışmaz", PCA_ADDR); return; }
+  pcaWrite1(0x00, 0x10);   // MODE1: uyku (frekans ancak uykuda değişir)
+  pcaWrite1(0xFE, 121);    // PRE_SCALE = 25 MHz / (4096 x 50 Hz) - 1
+  pcaWrite1(0x01, 0x04);   // MODE2: totem pole çıkış
+  pcaWrite1(0x00, 0x20);   // MODE1: uyan, adres otomatik artsın
+  delay(5);
+  pcaWrite1(0x00, 0xA0);   // yeniden başlat
+  for (int i = 0; i < 16; i++) pcaPulse(i, 0);
+  servoBaslangic();
+  tlog("PCA9685 hazır (0x%02X), %d servo kanalı", PCA_ADDR, SERVO_N);
+}
+
 const uint32_t WDT_TIMEOUT_S   = 3;
 
 // ================= AKÜ VOLTAJI =================
@@ -520,7 +590,18 @@ void odometryStep() {
   const float dt = CONTROL_PERIOD_MS / 1000.0f;
   readAllEncoders(counts);
   imuUpdate();
-  if (imuOk) headingDeg = imuHeading();
+  if (imuOk) {
+    float nh = imuHeading();
+    // Teşhis: 20 ms'de 40°'den büyük açı değişimi fiziksel olarak imkansız -> sensör yön kaybetmiş demektir
+    static float lastH = 0;
+    static uint32_t lastJumpLog = 0;
+    if (fabsf(wrap180(nh - lastH)) > 40 && millis() - lastJumpLog > 500) {
+      lastJumpLog = millis();
+      tlog("BNO055 yön sıçraması: %.0f° -> %.0f° (sensör beslemesini/kabloyu kontrol edin)", lastH, nh);
+    }
+    lastH = nh;
+    headingDeg = nh;
+  }
 
   float d[NUM_MOTORS];
   for (int i = 0; i < NUM_MOTORS; i++) {
@@ -710,6 +791,7 @@ void robotInit() {
   stopAll();
   resetAllEncoders();
   resetHeading();
+  servoBaslangic();
 }
 
 // ================= OTONOM ROTA (BURAYI DÜZENLEYİN) =================
@@ -746,9 +828,11 @@ void pathEvent(int id) {
   switch (id) {
     case 1:
       // şişeyi GDT penceresine bırak (pencere yerden 31-56 cm yükseklikte)
+      // örnek: servoAc(0, 90);
       break;
     case 2:
       // raftan şişe al
+      // örnek: servoAc(0, 0);
       break;
   }
 }
@@ -1005,7 +1089,8 @@ void pathNextOrDone() {
   if (pathSegEnd >= pathN - 1) {
     pathPhase = PP_DONE;
     stopAll();
-    tlog("Yol bitti (%.1f sn, en büyük sapma %.0f cm)", autoElapsedMs / 1000.0f, pathMaxErr);
+    tlog("Yol bitti (%.1f sn, en büyük sapma %.0f cm, son açı hatası %.0f°, açı %.0f°)",
+         autoElapsedMs / 1000.0f, pathMaxErr, wrap180(autoTH - headingDeg), headingDeg);
   } else {
     pathStartSegment(pathSegEnd);
   }
@@ -1288,6 +1373,7 @@ void teleopLoop() {
 // Stop / EMERGENCY STOP / bağlantı kopunca bir kez
 void robotEnd() {
   stopAll();
+  servoHepsiniBirak();   // Stop / Acil durdur / bağlantı kopması: servo darbeleri de kesilir
 }
 
 // ================= MAÇ AKIŞI =================
@@ -1425,7 +1511,7 @@ PendingCmd cmdQueue[8];
 int cmdHead = 0, cmdTail = 0;
 
 // loop'un hazırladığı durum (dsMux ile korunur)
-char statusCore[580] = "\"st\":0";
+char statusCore[680] = "\"st\":0";
 char telJson[TEL_SIZE * 2 + 8] = "\"\"";
 uint32_t telJsonSeq = 0;
 
@@ -1781,6 +1867,7 @@ void dsTick() {
     else if (!strcmp(c.name, "reboot")) { tlog("Yeniden başlatılıyor..."); stopAll(); delay(200); ESP.restart(); }
     else if (!strcmp(c.name, "chan")) applyChannel(c.a);
     else if (estopped) tlog("ACİL DURDURULDU - yeniden başlatma gerekli");
+    else if (!strcmp(c.name, "servo")) { if (matchState != ST_AUTO) servoCmd(c.a, c.b); }   // Panel servo testi (otonomda kapalı)
     else if (!strcmp(c.name, "init")) { if (matchState == ST_STANDBY || matchState == ST_STOPPED) dsInit(); }
     else if (!strcmp(c.name, "start")) {
       if (matchState == ST_INIT) {
@@ -1855,7 +1942,7 @@ void dsTick() {
            "\"heap\":%lu,\"heapT\":%lu,\"rssi\":%d,\"dm\":%d,\"ja\":%lu,\"cl\":%d,\"ld\":%d,"
            "\"x\":%.1f,\"y\":%.1f,\"h\":%.1f,\"bno\":%d,"
            "\"rpm\":[%.0f,%.0f,%.0f,%.0f],\"p\":[%.0f,%.0f,%.0f,%.0f],"
-           "\"pa\":%d,\"pn\":%d,\"pi\":%d,\"d\":[%.1f,%.1f,%.1f,%.1f],\"sw\":%d",
+           "\"pa\":%d,\"pn\":%d,\"pi\":%d,\"d\":[%.1f,%.1f,%.1f,%.1f],\"sw\":%d,\"pc\":%d",
            BATT_PIN >= 0 ? battVolts : -1.0f, BATT_WARN_V, BATT_LOW_V,
            (int)matchState, autoLeft, (unsigned long)(autoDurationMs / 1000), autoEnabled, estopped, safetyLock, fieldOriented,
            (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getHeapSize(), staRssi, deadlineMiss,
@@ -1864,7 +1951,7 @@ void dsTick() {
            rpm[0], rpm[1], rpm[2], rpm[3], motorPower[0], motorPower[1], motorPower[2], motorPower[3],
            pathActive, pathN, (pathMode && matchState == ST_AUTO) ? pathIdx : -1,
            counts[0] * CM_PER_COUNT, counts[1] * CM_PER_COUNT, counts[2] * CM_PER_COUNT, counts[3] * CM_PER_COUNT,
-           BOTTLE_SW_PIN < 0 ? -1 : (int)bottleIn);
+           BOTTLE_SW_PIN < 0 ? -1 : (int)bottleIn, pcaOk ? 1 : 0);
   portENTER_CRITICAL(&dsMux);
   memcpy(statusCore, core, sizeof(core));
   if (dirty) { memcpy(telJson, telEsc, sizeof(telEsc)); telJsonSeq = seq; }
@@ -1873,7 +1960,7 @@ void dsTick() {
 
 // ================= SERİ KOMUTLAR (test) =================
 void printHelp() {
-  Serial.println("Komutlar: p <fl> <fr> <rl> <rr> | d <ileri> <sol> <don> | a (otonom test) | s | z | r | e");
+  Serial.println("Komutlar: p <fl> <fr> <rl> <rr> | d <ileri> <sol> <don> | v <kanal> <derece> (servo) | a (otonom test) | s | z | r | e");
 }
 
 void handleSerial() {
@@ -1909,6 +1996,15 @@ void handleSerial() {
         drive(f, l, t);
         Serial.printf(">> Surus ileri:%.0f sol:%.0f don:%.0f\n", f, l, t);
       } else Serial.println("Kullanim: d <ileri> <sol> <don>");
+      break;
+    }
+    case 'v': {   // servo testi: v <kanal 0-5> <derece, -1 = bırak>
+      int ch, dg;
+      if (sscanf(arg, "%d %d", &ch, &dg) == 2 && ch >= 0 && ch < SERVO_N) {
+        if (matchState == ST_AUTO) { Serial.println(">> Otonom calisiyor - once durdurun"); break; }
+        servoCmd(ch, dg);
+        Serial.printf(">> Servo %d (PCA kanal %d): %s%s\n", ch + 1, ch, dg < 0 ? "birakildi" : "derece ayarlandi", pcaOk ? "" : "  (PCA9685 YOK!)");
+      } else Serial.println("Kullanim: v <kanal 0-5> <derece, -1 = birak>");
       break;
     }
     case 'a':   // Driver Station olmadan otonom testi (30 sn, sonra teleop'ta bekler)
@@ -1994,6 +2090,7 @@ void setup() {
   Wire.setClock(100000);
   i2cScan();
   bnoBegin(10, true);
+  servoBegin();
   delay(100);
   imuUpdate();
   imuZero = imuRawHeading;

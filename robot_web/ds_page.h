@@ -140,6 +140,12 @@ td:last-child{font-family:ui-monospace,Consolas,monospace}
     <h2>Robot</h2>
     <table><tbody id="robotTbl"></tbody></table>
   </div>
+  <div class="card" id="servoCard">
+    <h2>Servo Testi (PCA9685)</h2>
+    <div id="svRows"></div>
+    <div class="row"><button id="svOff">Hepsini bırak</button><span id="svSt" class="hint" style="margin:0"></span></div>
+    <div class="hint">Kaydırıcı servoyu hemen oynatır (otonomda kapalı). "Bırak" servonun darbesini keser, servo serbest kalır. Servonun açı ve darbe aralığı kodda (SERVO_MIN_US, SERVO_MAX_US, SERVO_RANGE_DEG) servo modeline göre ayarlanır.</div>
+  </div>
   <div class="card wide">
     <h2>Telemetri</h2>
     <pre id="tel"></pre>
@@ -322,7 +328,8 @@ function render(){const d=S;
  if(bOn)battUI(d,bv,bOk);
  const r=[['X',d.x.toFixed(1)+' cm'],['Y',d.y.toFixed(1)+' cm'],['Açı',d.h.toFixed(1)+'°'],['BNO055',d.bno?'Tamam':'Yok'],
   ['Akü',bOn?(bOk?bv.toFixed(2)+' V':'Bağlı değil'):'Kapalı'],['Saha-yönlü sürüş',d.fo?'AÇIK':'KAPALI'],['Güvenlik kilidi',d.lk?'KİLİTLİ':'Açık'],
-  ['Şişe sensörü',d.sw===undefined||d.sw<0?'-':(d.sw?'ŞİŞE VAR':'Boş')]].concat(['FL','FR','RL','RR'].map((n,i)=>[n,`${d.d?d.d[i].toFixed(1)+' cm · ':''}${Math.round(d.rpm[i])} rpm · %${Math.round(d.p[i])}`]));
+  ['Şişe sensörü',d.sw===undefined||d.sw<0?'-':(d.sw?'ŞİŞE VAR':'Boş')],
+  ['Servo kartı (PCA9685)',d.pc===undefined?'-':(d.pc?'Bulundu':'YOK')]].concat(['FL','FR','RL','RR'].map((n,i)=>[n,`${d.d?d.d[i].toFixed(1)+' cm · ':''}${Math.round(d.rpm[i])} rpm · %${Math.round(d.p[i])}`]));
  $('robotTbl').innerHTML=r.map(x=>`<tr><td>${x[0]}</td><td>${x[1]}</td></tr>`).join('');
  $('nRssi').textContent=d.rssi?d.rssi+' dBm':'-';$('nDm').textContent=d.dm?'EVET':'Yok';
  $('nJa').textContent=d.ja+' ms';$('nCl').textContent=d.cl;$('nLd').textContent=d.ld<0?'-':'neden '+d.ld;
@@ -404,6 +411,17 @@ async function loadInfo(){try{const r=await fetch('/info',{cache:'no-store'});co
  $('sHeap').textContent=`${Math.round(i.heap/1024)} / ${Math.round(i.heapT/1024)} KB`;$('sPs').textContent=i.psram?Math.round(i.psram/1024)+' KB':'Yok';
  $('sFl').textContent=`${Math.round(i.sketch/1024)} / ${Math.round(i.flash/1024)} KB`;$('sFree').textContent=Math.round(i.free/1024)+' KB'}catch(e){}}
 setInterval(()=>{if($('p-logs').classList.contains('on'))loadInfo()},2000);
+
+// Servo testi: kanal 0..5 = Injector sinyal girişi 1..6
+const SVN=6;
+$('svRows').innerHTML=[...Array(SVN)].map((_,i)=>`<div class="row"><label for="sv${i}">Servo ${i+1} <span style="color:var(--dim);font-size:12px">(kanal ${i})</span></label><input type="range" id="sv${i}" min="0" max="180" value="90" style="flex:1;margin:0 8px"><b id="svv${i}" style="min-width:44px;text-align:right">-</b></div>`).join('');
+let svSent=[0,0,0,0,0,0];
+for(let i=0;i<SVN;i++){const el=$('sv'+i);
+ const send=()=>{$('svv'+i).textContent=el.value+'°';cmd('servo',i,+el.value);svSent[i]=Date.now()};
+ el.oninput=()=>{$('svv'+i).textContent=el.value+'°';if(Date.now()-svSent[i]>80)send()};
+ el.onchange=send}
+$('svOff').onclick=()=>{for(let i=0;i<SVN;i++){cmd('servo',i,-1);$('svv'+i).textContent='-'}};
+setInterval(()=>{if(S&&S.pc!==undefined)$('svSt').textContent=S.pc?'PCA9685 bağlı':'PCA9685 bulunamadı - SDA/SCL, besleme kontrol edin'},500);
 
 // PID ayarları
 // Açıklama balonları: ayarın üstüne gelince (telefonda kutuya dokununca) çıkar
